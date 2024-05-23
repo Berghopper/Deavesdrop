@@ -1,4 +1,6 @@
 # Deavesdrop
+(Deavesdrop = Discord + eavesdrop) 
+
 Discord bot for recording voice channels, with the attempt of making it memory efficient.
 
 Inspired by [the pycord voice recording example](https://github.com/Pycord-Development/pycord/blob/d0b9f5ef7861d2b23f174aa10cbea866690b4bf4/examples/audio_recording_merged.py).
