@@ -30,15 +30,16 @@ def combine_mp3_files(files: list[str], fn: str, tmp_fn: str):
         time.sleep(0.1)
         pass
 
+    return process.returncode == 0
 
-def overlay_mp3_files(files: list[str], fn: str):
+
+def overlay_mp3_files(files: dict[str, int], fn: str):
     """
     Overlay mp3 files into a single mp3 file with ffmpeg.
 
-    ffmpeg -i input0.mp3 -i input1.mp3 -filter_complex amix=inputs=2:duration=longest output.mp3
-    ffmpeg -i VOCALS -i MUSIC -filter_complex amix=inputs=2:duration=longest:dropout_transition=0:weights="1 0.25":normalize=0 OUTPUT
+    files is a dict of file paths and each of their weights (int 0-100), which is the volume level.
 
-    TODO audio weights? e.g. different volume levels for different users.
+    https://ffmpeg.org/ffmpeg-filters.html#amix
     """
 
     args = ["ffmpeg"]
@@ -46,7 +47,16 @@ def overlay_mp3_files(files: list[str], fn: str):
     for f in files:
         args.extend(["-i", f])
 
-    args.extend(["-filter_complex", "amix=inputs=2:duration=longest", fn])
+    inputs_n = len(files.keys())
+    weight_str = " ".join([f"{v/100:.2f}" for v in files.values()])
+
+    args.extend(
+        [
+            "-filter_complex",
+            f"amix=inputs={inputs_n}:duration=longest:weights={weight_str}",
+            fn,
+        ]
+    )
 
     try:
         process = subprocess.Popen(
@@ -64,6 +74,8 @@ def overlay_mp3_files(files: list[str], fn: str):
     while process.poll() is None:
         time.sleep(0.1)
         pass
+
+    return process.returncode == 0
 
 
 def write_wav_btyes_to_mp3_file(audio_dat: io.BytesIO, fn: str):

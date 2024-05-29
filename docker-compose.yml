@@ -1,0 +1,10 @@
+version: '3.8'
+
+services:
+  myapp:
+    build: .
+    volumes:
+      - ./output:/app/output
+      - ./secrets:/app/secrets
+      - ./user_volumes.txt:/app/user_volumes.txt
+    restart: always

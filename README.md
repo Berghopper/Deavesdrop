@@ -18,16 +18,14 @@ Feel free to run this bot for yourself and modify it to your needs. :).
 - Runs bot on whitelisted text channels
 - Record voice channels (but only one at a time)
 - Flushes audio to disk for every ~100MB (editable in .env)
-- Stores files locally for now
-
-## TBA
-
 - upload files to Gdrive
 - add user volume weighting (e.g. lower the volume of a user/bot that is too loud)
 
 ## Setup
 
 - install the required packages with `pip install -r requirements.txt`
-- install ffmpeg
+- install ffmpeg and 7z
 - create a `.env` file based on the `.env-example` file
+- for the gdrive upload we need a `secrets` folder
+- add `secret.json` to `secrets` folder so we can authenticate with bot
 - run it!

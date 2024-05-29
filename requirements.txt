@@ -1,3 +1,6 @@
 py-cord==2.5.0
-py-cord==2.5.0[voice]
+py-cord[voice]==2.5.0
 python-dotenv==1.0.1
+google-api-python-client
+google-auth-httplib2 
+google-auth-oauthlib
