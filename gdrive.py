@@ -7,17 +7,31 @@ from googleapiclient.discovery import Resource, build
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload
 
+from discord import ApplicationContext
+import time
+
 # app-only file access
 SCOPES = ["https://www.googleapis.com/auth/drive.file"]
 
 
 class GoogleDriveUploader:
-    def __init__(self, secret_file, token_file=None):
-        self.service, self.creds = GoogleDriveUploader.build_service(
-            secret_file, token_file
-        )
+    def __init__(self, token_file):
+        self.token_file = token_file
+        self.service = None
+        self.creds = None
+        # self.service, self.creds = GoogleDriveUploader.build_service(ctx, token_file)
 
-    def build_service(secret_file, token_file=None) -> tuple[Resource, Credentials]:
+    def init_auth(self, ctx) -> bool:
+        self.service, self.creds = GoogleDriveUploader.build_service(
+            ctx, self.token_file
+        )
+        if self.service and self.creds:
+            return True
+        return False
+
+    def build_service(
+        ctxs: list[ApplicationContext], token_file
+    ) -> tuple[Resource, Credentials]:
         creds = None
         if token_file and os.path.exists(token_file):
             creds = Credentials.from_authorized_user_file(token_file, SCOPES)
@@ -25,8 +39,11 @@ class GoogleDriveUploader:
             if creds and creds.expired and creds.refresh_token:
                 creds.refresh(Request())
             else:
-                flow = InstalledAppFlow.from_client_secrets_file(secret_file, SCOPES)
-                creds = flow.run_local_server(port=0)
+                for ctx in ctxs:
+                    ctx.send(
+                        "Please contact the bot owner to authenticate with Google Drive API, token has expired/is invalid or missing."
+                    )
+                return None, None
             # Save the credentials for the next run if token_file is provided
             if token_file:
                 with open(token_file, "w") as token:
@@ -41,6 +58,8 @@ class GoogleDriveUploader:
         return len(files) > 0
 
     def upload_resumable(self, file_path, g_folder_id):
+        if not self.service or not self.creds:
+            raise ValueError("Google Drive API not authenticated.")
         file_name = os.path.basename(file_path)
 
         metadata = {
@@ -57,4 +76,5 @@ class GoogleDriveUploader:
             )
             return file.get("id")
         except HttpError as error:
+            print(f"GDRIVE An error occurred: {error}")
             return None

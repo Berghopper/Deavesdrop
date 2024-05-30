@@ -21,11 +21,17 @@ Feel free to run this bot for yourself and modify it to your needs. :).
 - upload files to Gdrive
 - add user volume weighting (e.g. lower the volume of a user/bot that is too loud)
 
+## TBA:
+
+- Add a better way of handling gauth.
+- Check for memory leaks?
+
 ## Setup
 
 - install the required packages with `pip install -r requirements.txt`
 - install ffmpeg and 7z
 - create a `.env` file based on the `.env-example` file
 - for the gdrive upload we need a `secrets` folder
-- add `secret.json` to `secrets` folder so we can authenticate with bot
+- add `secret.json`/`token.json` to `secrets` folder so we can authenticate with bot.
+  + `token.json` needs to be retrieved manually with the `gauth.py` script and authorizing the bot.
 - run it!

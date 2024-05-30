@@ -41,10 +41,14 @@ class MemoryConsiousMP3Sink(MP3Sink):
     During write method, we check how big the bytesIO has gotten, and if it's too big, we flush to a file.
     """
 
-    def __init__(self, *, filters=None, max_size_mb=100, output_folder="output"):
+    def __init__(
+        self, *, filters=None, max_size_mb=100, output_folder="output", output_fn=None
+    ):
         super().__init__(filters=filters)
         self.max_size_mb = max_size_mb
         self.output_folder = output_folder
+        if output_fn:
+            self.output_fn = output_fn
         os.makedirs(output_folder, exist_ok=True)
 
     def check_memory_size(self):
@@ -155,3 +159,15 @@ class MemoryConsiousMP3Sink(MP3Sink):
         if self.check_memory_size():
             # If it has, flush the buffer to a file.
             self.flushToFile()
+
+    def cleanup_no_flush(self):
+        """
+        Finishes and cleans up the audio data.
+        This is a bit paranoid, but whatever.
+        Wipes anything left in memory (if there is anything).
+        """
+        for audio_data in self.audio_data.values():
+            audio_data: AudioData
+            audio_data.file.seek(0)
+            audio_data.file.truncate(0)
+            audio_data.file.close()

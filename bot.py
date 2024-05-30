@@ -33,8 +33,14 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 # vars
 connections = {}
-recording = False
+# Keep recording True to block until the bot is ready to record.
+recording = True
 user_volumes = {}
+
+gdrive = GoogleDriveUploader(
+    token_file=f"{GDRIVE_SECRETS_DIR}/token.json",
+)
+
 # load user volumes
 try:
     if os.path.exists("user_volumes.txt"):
@@ -95,10 +101,14 @@ async def is_correct_channel(ctx):
     return str(ctx.channel.id) in CHANNEL_IDS
 
 
-async def finished_callback(sink: MP3Sink, channel: discord.TextChannel):
-    combind_fn = (
-        f"{OUTPUT_PATH}/combined-{datetime.now().strftime('%Y-%m-%d_%H:%M:%S')}.mp3"
-    )
+async def finished_callback(sink: MemoryConsiousMP3Sink, channel: discord.TextChannel):
+    combind_fn = None
+    if hasattr(sink, "output_fn") and sink.output_fn:
+        combind_fn = f"{OUTPUT_PATH}/{sink.output_fn}.mp3"
+    else:
+        combind_fn = (
+            f"{OUTPUT_PATH}/combined-{datetime.now().strftime('%Y-%m-%d_%H:%M:%S')}.mp3"
+        )
 
     await channel.send("Combining audio files of individual users...")
     tmp_files = []
@@ -146,10 +156,7 @@ async def finished_callback(sink: MP3Sink, channel: discord.TextChannel):
     combined_zip_fn = zip_protect(combind_fn)
     remove_files([combind_fn])
 
-    file_id = GoogleDriveUploader(
-        f"{GDRIVE_SECRETS_DIR}/secret.json",
-        token_file=f"{GDRIVE_SECRETS_DIR}/token.json",
-    ).upload_resumable(combined_zip_fn, OUTPUT_G_FOLDER_ID)
+    file_id = gdrive.upload_resumable(combined_zip_fn, OUTPUT_G_FOLDER_ID)
 
     if file_id:
         remove_files([combined_zip_fn])
@@ -157,22 +164,39 @@ async def finished_callback(sink: MP3Sink, channel: discord.TextChannel):
     else:
         await channel.send("Failed to upload to Google Drive! File is on bot server.")
 
+    # For sanity
+    sink.cleanup_no_flush()
+
+    global recording
+    recording = False
+
 
 # events
 @bot.event
 async def on_ready():
     print(f"Logged in as {bot.user}")
+
+    channels = [bot.get_channel(int(channel_id)) for channel_id in CHANNEL_IDS]
+
+    # Check GDrive
+    global gdrive
+    succes = gdrive.init_auth(channels)
+    if not succes:
+        # Dont update the recording flag, we can't record without GDrive.
+        return
+
     # Check if the output folder exists and is empty
     if not os.path.exists(OUTPUT_PATH):
         os.makedirs(OUTPUT_PATH)
     else:
         # if files are present, alert the channel
         if os.listdir(OUTPUT_PATH):
-            for channel_id in CHANNEL_IDS:
-                channel = bot.get_channel(int(channel_id))
+            for channel in channels:
                 await channel.send(
                     "The output folder is not empty, perhaps a previous recording was not finished correctly?"
                 )
+    global recording
+    recording = False
 
 
 @bot.event
@@ -216,8 +240,10 @@ async def join(ctx: discord.ApplicationContext):
 
 
 @bot.command()
-async def start(ctx: discord.ApplicationContext):
-    """Record the voice channel!"""
+async def start(ctx: discord.ApplicationContext, name: str = None):
+    """Record the voice channel!
+    Default output file name is the current date and time (utc).
+    """
     global recording
     voice = ctx.author.voice
 
@@ -237,7 +263,9 @@ async def start(ctx: discord.ApplicationContext):
     recording = True
 
     vc.start_recording(
-        MemoryConsiousMP3Sink(max_size_mb=MAX_MB_IN_MEM, output_folder=OUTPUT_PATH),
+        MemoryConsiousMP3Sink(
+            max_size_mb=MAX_MB_IN_MEM, output_folder=OUTPUT_PATH, output_fn=name
+        ),
         finished_callback,
         ctx.channel,
         sync_start=True,
@@ -249,14 +277,12 @@ async def start(ctx: discord.ApplicationContext):
 @bot.command()
 async def stop(ctx: discord.ApplicationContext):
     """Stop the recording"""
-    global recording
     vc: discord.VoiceClient = ctx.voice_client
 
     if not vc:
         return await ctx.send("There's no recording going on right now")
 
     vc.stop_recording()
-    recording = False
 
     await ctx.send("The recording has stopped!")
 
