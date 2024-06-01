@@ -1,17 +1,29 @@
 import io
+import os
 import subprocess
 import time
 
 
-def combine_mp3_files(files: list[str], fn: str, tmp_fn: str):
+def combine_mp3_files(files: list[str], fn: str, tmp_fn: str, output_path: str):
     """
     Combines mp3 files into a single mp3 file.
     using ffmpeg directly. pydub, again, saves stuff in memory as wav. (yay!)
     """
+    if not files:
+        return False
+    if len(files) == 1:
+        os.rename(files[0], fn)
+        return True
+    files = [x.replace(f"{output_path}/", "") for x in files]
+
     with open(tmp_fn, "w") as f:
         f.write("\n".join([f"file '{f}'" for f in files]))
 
     args = ["ffmpeg", "-f", "concat", "-safe", "0", "-i", tmp_fn, "-c", "copy", fn]
+
+    print("RUNNING FFMPEG WITH ARGS:")
+    print(args)
+    print(" ".join(args))
 
     try:
         process = subprocess.Popen(
@@ -41,6 +53,11 @@ def overlay_mp3_files(files: dict[str, int], fn: str):
 
     https://ffmpeg.org/ffmpeg-filters.html#amix
     """
+    if not files:
+        return False
+    if len(files) == 1:
+        os.rename(list(files.keys())[0], fn)
+        return True
 
     args = ["ffmpeg"]
 
@@ -57,6 +74,9 @@ def overlay_mp3_files(files: dict[str, int], fn: str):
             fn,
         ]
     )
+    print("RUNNING FFMPEG WITH ARGS:")
+    print(args)
+    print(" ".join(args))
 
     try:
         process = subprocess.Popen(
@@ -98,6 +118,10 @@ def write_wav_btyes_to_mp3_file(audio_dat: io.BytesIO, fn: str):
         "mp3",
         "pipe:1",
     ]
+
+    print("RUNNING FFMPEG WITH ARGS:")
+    print(args)
+    print(" ".join(args))
     try:
         process = subprocess.Popen(
             args,

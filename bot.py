@@ -1,3 +1,4 @@
+import asyncio
 import os
 import subprocess
 import time
@@ -5,12 +6,12 @@ from datetime import datetime
 
 import discord
 from discord.ext import commands
-from discord.sinks import MP3Sink
+from discord.sinks import RecordingException
 from dotenv import dotenv_values
 
 from ffmpeg_util import combine_mp3_files, overlay_mp3_files
 from gdrive import GoogleDriveUploader
-from vc_util import MemoryConsiousMP3Sink
+from vc_util import MemoryConciousVoiceClient, MemoryConsiousMP3Sink
 
 # globals
 config = dotenv_values(".env")
@@ -19,6 +20,7 @@ TOKEN = config["TOKEN"]
 CHANNEL_IDS = config["CHANNEL_IDS"].split(",")
 VERSION = config["VERSION"]
 MAX_MB_IN_MEM = int(config["MAX_MB_IN_MEM"])
+MAX_MB_BEFORE_FLUSH = int(config["MAX_MB_IN_MEM"])
 OUTPUT_PATH = config["OUTPUT_PATH"]
 BOT_NAME = config["BOT_NAME"]
 OUTPUT_G_FOLDER_ID = config["OUTPUT_G_FOLDER_ID"]
@@ -102,23 +104,28 @@ async def is_correct_channel(ctx):
 
 
 async def finished_callback(sink: MemoryConsiousMP3Sink, channel: discord.TextChannel):
+    # FIXME: sleep 10 secs so background threads can finish (should be fixed properly)
+    while sink.any_threads_alive():
+        # wait for threads to finish
+        await asyncio.sleep(1)
+    current_date = datetime.now().strftime("%Y-%m-%d_%H.%M.%S")
     combind_fn = None
     if hasattr(sink, "output_fn") and sink.output_fn:
         combind_fn = f"{OUTPUT_PATH}/{sink.output_fn}.mp3"
     else:
-        combind_fn = (
-            f"{OUTPUT_PATH}/combined-{datetime.now().strftime('%Y-%m-%d_%H:%M:%S')}.mp3"
-        )
+        combind_fn = f"{OUTPUT_PATH}/combined-{current_date}.mp3"
 
     await channel.send("Combining audio files of individual users...")
     tmp_files = []
     for user_id, audio in sink.audio_data.items():
+        files_on_disk = list(audio.get_actual_files())
         tmp_files.append(f"{OUTPUT_PATH}/temp_combine_{user_id}.txt")
         success = combine_mp3_files(
             # for this specifically we need to strip off the prepended output folder
-            [x.replace(f"{OUTPUT_PATH}/", "") for x in audio.files_on_disk],
-            f"{OUTPUT_PATH}/{user_id}.mp3",
+            files_on_disk,
+            f"{OUTPUT_PATH}/{user_id}-{current_date}.mp3",
             f"{OUTPUT_PATH}/temp_combine_{user_id}.txt",
+            OUTPUT_PATH,
         )
         if not success:
             user = await bot.fetch_user(user_id)
@@ -128,7 +135,7 @@ async def finished_callback(sink: MemoryConsiousMP3Sink, channel: discord.TextCh
             remove_files(tmp_files)
             return
         else:
-            remove_files(audio.files_on_disk)
+            remove_files(files_on_disk)
     remove_files(tmp_files)
 
     await channel.send("Overlaying audio files...")
@@ -136,7 +143,7 @@ async def finished_callback(sink: MemoryConsiousMP3Sink, channel: discord.TextCh
     inp = {}
 
     for user_id in sink.audio_data.keys():
-        file_path = f"{OUTPUT_PATH}/{user_id}.mp3"
+        file_path = f"{OUTPUT_PATH}/{user_id}-{current_date}.mp3"
         if user_volumes.get(user_id, None):
             inp[file_path] = user_volumes[user_id]
         else:
@@ -234,7 +241,9 @@ async def join(ctx: discord.ApplicationContext):
         await ctx.send("You're not in a vc right now")
         return
 
-    await voice.channel.connect()
+    await voice.channel.connect(cls=MemoryConciousVoiceClient)
+
+    # FIXME global connected var as blocking until the bot is connected.
 
     await ctx.send("Joined!")
 
@@ -264,7 +273,10 @@ async def start(ctx: discord.ApplicationContext, name: str = None):
 
     vc.start_recording(
         MemoryConsiousMP3Sink(
-            max_size_mb=MAX_MB_IN_MEM, output_folder=OUTPUT_PATH, output_fn=name
+            max_before_flush=MAX_MB_BEFORE_FLUSH,
+            max_size_mb=MAX_MB_IN_MEM,
+            output_folder=OUTPUT_PATH,
+            output_fn=name,
         ),
         finished_callback,
         ctx.channel,
@@ -282,7 +294,12 @@ async def stop(ctx: discord.ApplicationContext):
     if not vc:
         return await ctx.send("There's no recording going on right now")
 
-    vc.stop_recording()
+    try:
+        vc.stop_recording()
+    except RecordingException:
+        return await ctx.send(
+            f"There's no recording going on right now/something went wrong."
+        )
 
     await ctx.send("The recording has stopped!")
 
@@ -334,6 +351,16 @@ async def resetvols(ctx: discord.ApplicationContext):
     # delete the file
     remove_files(["user_volumes.txt"])
     await ctx.send("Volumes reset.")
+
+
+# Uncomment to enable quit command, used for debugging/force quitting the bot.
+# @bot.command()
+# async def quit(ctx: discord.ApplicationContext):
+#     """!quit. Quit the bot."""
+#     import sys
+#     await ctx.send("Quitting...")
+#     await bot.close()
+#     sys.exit(0)
 
 
 bot.add_check(is_correct_channel)
