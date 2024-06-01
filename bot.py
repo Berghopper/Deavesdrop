@@ -251,7 +251,7 @@ async def join(ctx: discord.ApplicationContext):
 
 @bot.command()
 async def start(ctx: discord.ApplicationContext, name: str = None):
-    """Record the voice channel! Optional argument: <name> to name the recording."""
+    """Record the voice channel! Optional argument: <name>."""
     global recording, ready
 
     if not ready:
@@ -346,7 +346,7 @@ async def setvol(ctx: discord.ApplicationContext, user: discord.User, volume: in
 
 @bot.command()
 async def getvols(ctx: discord.ApplicationContext):
-    """!getvols. Get the edited volumes of the users. (if not set, defaults to 100)"""
+    """Get the edited volumes of the users. default: 100"""
     for user_id, volume in user_volumes.items():
         user = await bot.fetch_user(user_id)
         await ctx.send(f"{user.mention}: {volume}")
@@ -354,7 +354,7 @@ async def getvols(ctx: discord.ApplicationContext):
 
 @bot.command()
 async def resetvols(ctx: discord.ApplicationContext):
-    """!resetvols. Reset the edited volumes of the users."""
+    """Reset the edited volumes of the users."""
     global user_volumes
     user_volumes = {}
     # delete the file
