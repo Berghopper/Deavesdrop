@@ -11,8 +11,14 @@ import discord
 import discord.opus as opus
 from discord.opus import DecodeManager, OpusError
 from discord.sinks import AudioData, Filters, MP3Sink, RawData, RecordingException
+from dotenv import dotenv_values
 
 from ffmpeg_util import write_wav_btyes_to_mp3_file
+
+# globals
+config = dotenv_values(".env")
+
+MAX_MB_BEFORE_FLUSH = int(config["MAX_MB_BEFORE_FLUSH"])
 
 """
 Reimplements some pycord classes to allow flushing audio data to disk when it gets too big.
@@ -336,11 +342,12 @@ class MemoryConciousVoiceClient(discord.VoiceClient):
             time.sleep(0.05)
         user_id = self.ws.ssrc_map[data.ssrc]["user_id"]
 
-        # Check if the silence is large (~100mb)
-        # (add debug 'x' to accelerate this issue triggering)
+        # Check if the silence is larger than the MAX_MB_BEFORE_FLUSH
+        # (add debug 'x' to accelerate this issue triggering), this used to be a memleak here.
         # x = 10_000
+
         silence_length = max(0, int(silence)) * opus._OpusStruct.CHANNELS  # * x
-        if silence_length > 100 * 1024 * 1024:
+        if silence_length > (MAX_MB_BEFORE_FLUSH * 1024 * 1024):
             # write silence in chunks of 10mb
             while silence_length != 0:
                 chunk = min(silence_length, 10 * 1024 * 1024)
