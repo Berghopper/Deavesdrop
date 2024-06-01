@@ -20,7 +20,7 @@ TOKEN = config["TOKEN"]
 CHANNEL_IDS = config["CHANNEL_IDS"].split(",")
 VERSION = config["VERSION"]
 MAX_MB_IN_MEM = int(config["MAX_MB_IN_MEM"])
-MAX_MB_BEFORE_FLUSH = int(config["MAX_MB_IN_MEM"])
+MAX_MB_BEFORE_FLUSH = int(config["MAX_MB_BEFORE_FLUSH"])
 OUTPUT_PATH = config["OUTPUT_PATH"]
 BOT_NAME = config["BOT_NAME"]
 OUTPUT_G_FOLDER_ID = config["OUTPUT_G_FOLDER_ID"]
@@ -37,6 +37,7 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 connections = {}
 # Keep recording True to block until the bot is ready to record.
 recording = True
+ready = False
 user_volumes = {}
 
 gdrive = GoogleDriveUploader(
@@ -104,7 +105,6 @@ async def is_correct_channel(ctx):
 
 
 async def finished_callback(sink: MemoryConsiousMP3Sink, channel: discord.TextChannel):
-    # FIXME: sleep 10 secs so background threads can finish (should be fixed properly)
     while sink.any_threads_alive():
         # wait for threads to finish
         await asyncio.sleep(1)
@@ -243,17 +243,20 @@ async def join(ctx: discord.ApplicationContext):
 
     await voice.channel.connect(cls=MemoryConciousVoiceClient)
 
-    # FIXME global connected var as blocking until the bot is connected.
+    global ready
+    ready = True
 
     await ctx.send("Joined!")
 
 
 @bot.command()
 async def start(ctx: discord.ApplicationContext, name: str = None):
-    """Record the voice channel!
-    Default output file name is the current date and time (utc).
-    """
-    global recording
+    """Record the voice channel! Optional argument: <name> to name the recording."""
+    global recording, ready
+
+    if not ready:
+        return await ctx.send("I'm not in a vc yet, maybe you were too fast?")
+
     voice = ctx.author.voice
 
     if not voice:
@@ -271,17 +274,23 @@ async def start(ctx: discord.ApplicationContext, name: str = None):
 
     recording = True
 
-    vc.start_recording(
-        MemoryConsiousMP3Sink(
-            max_before_flush=MAX_MB_BEFORE_FLUSH,
-            max_size_mb=MAX_MB_IN_MEM,
-            output_folder=OUTPUT_PATH,
-            output_fn=name,
-        ),
-        finished_callback,
-        ctx.channel,
-        sync_start=True,
-    )
+    try:
+        vc.start_recording(
+            MemoryConsiousMP3Sink(
+                max_before_flush=MAX_MB_BEFORE_FLUSH,
+                max_size_mb=MAX_MB_IN_MEM,
+                output_folder=OUTPUT_PATH,
+                output_fn=name,
+            ),
+            finished_callback,
+            ctx.channel,
+            sync_start=True,
+        )
+    except RecordingException:
+        recording = False
+        return await ctx.send(
+            "Couldn't start recording. Maybe the bot is already recording/not ready?"
+        )
 
     await ctx.send("The recording has started!")
 
