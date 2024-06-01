@@ -187,7 +187,7 @@ async def on_ready():
 
     # Check GDrive
     global gdrive
-    succes = gdrive.init_auth(channels)
+    succes = await gdrive.init_auth(channels)
     if not succes:
         # Dont update the recording flag, we can't record without GDrive.
         return

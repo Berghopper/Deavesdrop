@@ -8,7 +8,6 @@ from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload
 
 from discord import ApplicationContext
-import time
 
 # app-only file access
 SCOPES = ["https://www.googleapis.com/auth/drive.file"]
@@ -21,15 +20,15 @@ class GoogleDriveUploader:
         self.creds = None
         # self.service, self.creds = GoogleDriveUploader.build_service(ctx, token_file)
 
-    def init_auth(self, ctx) -> bool:
-        self.service, self.creds = GoogleDriveUploader.build_service(
+    async def init_auth(self, ctx) -> bool:
+        self.service, self.creds = await GoogleDriveUploader.build_service(
             ctx, self.token_file
         )
         if self.service and self.creds:
             return True
         return False
 
-    def build_service(
+    async def build_service(
         ctxs: list[ApplicationContext], token_file
     ) -> tuple[Resource, Credentials]:
         creds = None
@@ -40,7 +39,7 @@ class GoogleDriveUploader:
                 creds.refresh(Request())
             else:
                 for ctx in ctxs:
-                    ctx.send(
+                    await ctx.send(
                         "Please contact the bot owner to authenticate with Google Drive API, token has expired/is invalid or missing."
                     )
                 return None, None
