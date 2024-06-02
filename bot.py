@@ -36,6 +36,7 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 # vars
 connections = {}
 # Keep recording True to block until the bot is ready to record.
+processing = False
 recording = True
 ready = False
 user_volumes = {}
@@ -105,7 +106,12 @@ async def is_correct_channel(ctx):
 
 
 async def finished_callback(sink: MemoryConsiousMP3Sink, channel: discord.TextChannel):
-    print("Starting processing... (this may take a while/bot may be unresponsive)")
+    global processing, recording
+    processing = True
+    await channel.send(
+        "Starting processing... (this may take a while/bot may be unresponsive)"
+    )
+
     # FIXME: make ffmpeg calls properly async
     while sink.any_threads_alive():
         # wait for threads to finish
@@ -176,8 +182,8 @@ async def finished_callback(sink: MemoryConsiousMP3Sink, channel: discord.TextCh
     # For sanity
     sink.cleanup_no_flush()
 
-    global recording
     recording = False
+    processing = False
 
 
 # events
@@ -269,7 +275,7 @@ async def start(ctx: discord.ApplicationContext, name: str = None):
     if not vc:
         return await ctx.send("I'm not in a vc right now. Use `!join` to make me join!")
 
-    if recording:
+    if recording and vc.recording and not processing:
         return await ctx.send(
             "I'm already recording in another channel! Can't record in multiple channels at once."
         )
@@ -284,6 +290,7 @@ async def start(ctx: discord.ApplicationContext, name: str = None):
                 output_folder=OUTPUT_PATH,
                 output_fn=name,
             ),
+            ctx.channel,
             finished_callback,
             ctx.channel,
             sync_start=True,
@@ -362,6 +369,19 @@ async def resetvols(ctx: discord.ApplicationContext):
     # delete the file
     remove_files(["user_volumes.txt"])
     await ctx.send("Volumes reset.")
+
+
+@bot.command()
+async def status(ctx: discord.ApplicationContext):
+    """Get the status of the bot."""
+    global recording, processing
+    if processing:
+        await ctx.send("The bot is currently processing a previous recording.")
+    elif recording:
+        await ctx.send("The bot is currently recording.")
+        # TODO: add more info, like the current recording size/length
+    else:
+        await ctx.send("The bot is currently not recording.")
 
 
 # Uncomment to enable quit command, used for debugging/force quitting the bot.

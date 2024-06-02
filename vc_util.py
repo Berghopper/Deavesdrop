@@ -1,6 +1,9 @@
+import asyncio
 import gc
 import io
+import multiprocessing as mp
 import os
+import select
 import struct
 import sys
 import threading
@@ -10,7 +13,8 @@ from datetime import datetime
 import discord
 import discord.opus as opus
 from discord.opus import DecodeManager, OpusError
-from discord.sinks import AudioData, Filters, MP3Sink, RawData, RecordingException
+from discord.sinks import (AudioData, Filters, MP3Sink, RawData,
+                           RecordingException)
 from dotenv import dotenv_values
 
 from ffmpeg_util import write_wav_btyes_to_mp3_file
@@ -92,9 +96,17 @@ class MemoryConsiousMP3Sink(MP3Sink):
         return self.get_total_size() + n > (self.max_mb_before_flush * 1024 * 1024)
 
     def should_wait_for_memory(self, n=0):
+        """
+        We should await when we have too much memory in threads OR if we have too many threads already running.
+        """
         # print(f"Memory in threads: {self.mem_in_threads / (1024 * 1024)}")
         # print(f"Max thread size: {self.max_size_mb}")
-        return self.mem_in_threads() + n > (self.max_size_mb * 1024 * 1024)
+
+        # Max threads allowed is at least 1, but at most cpu_count - 1.
+        max_threads_allowed = min(1, mp.cpu_count() - 1)
+        return (self.mem_in_threads() + n > (self.max_size_mb * 1024 * 1024)) or len(
+            self.write_threads
+        ) >= max_threads_allowed
 
     def mem_in_threads(self):
         # First reomve dead threads
@@ -111,7 +123,7 @@ class MemoryConsiousMP3Sink(MP3Sink):
         Decoder might back up, but we can't do much about that.
         """
         print("Waiting for memory to be freed... too much memory stuck in threads.")
-        while self.mem_in_threads() > (self.max_size_mb * 1024 * 1024):
+        while self.should_wait_for_memory():
             time.sleep(0.1)
         gc.collect()
         print("Memory freed! Resuming...")
@@ -261,7 +273,9 @@ class MemoryConciousDecodeManager(DecodeManager):
 
 
 class MemoryConciousVoiceClient(discord.VoiceClient):
-    def start_recording(self, sink, callback, *args, sync_start: bool = False):
+    def start_recording(
+        self, sink, txtchannel, callback, *args, sync_start: bool = False
+    ):
         """The bot will begin recording audio from the current voice channel it is in.
         This function uses a thread so the current code line will not be stopped.
         Must be in a voice channel to use.
@@ -306,6 +320,7 @@ class MemoryConciousVoiceClient(discord.VoiceClient):
         self.recording = True
         self.sync_start = sync_start
         self.sink: MemoryConsiousMP3Sink = sink
+        self.txtchannel = txtchannel
         sink.init(self)
 
         t = threading.Thread(
@@ -317,6 +332,99 @@ class MemoryConciousVoiceClient(discord.VoiceClient):
             ),
         )
         t.start()
+
+    def send_msg_to_txtchannel(self, msg):
+        """
+        Attempts to send a message to the text channel.
+        Ignore if it fails.
+        """
+        try:
+            if hasattr(self, "txtchannel"):
+                asyncio.run_coroutine_threadsafe(
+                    self.txtchannel.send(msg), self.loop
+                ).result()
+        except Exception as e:
+            print(f"Failed to send message to text channel: {e}")
+
+    def recv_audio(self, sink, callback, *args):
+        """
+        Overriding this, to make sure socket stays alive, instead of stopping recording.
+        Might still fail of course, but we can try.
+        Discords co-routines should make sure the socket stays alive, we cannot control it here.
+        """
+        # Gets data from _recv_audio and sorts
+        # it by user, handles pcm files and
+        # silence that should be added.
+
+        self.user_timestamps: dict[int, tuple[int, float]] = {}
+        self.starting_time = time.perf_counter()
+        self.first_packet_timestamp: float
+
+        sleep_time = 0.05
+
+        sent_reconnect_msg = False
+        reconnect_msg = "Connection error occurred! Trying to reconnect..."
+        fail_msg = "Failed to reconnect, stopping recording."
+        while self.recording:
+            for _ in range(0, 10):
+                try:
+                    ready, _, err = select.select(
+                        [self.socket], [], [self.socket], 0.01
+                    )
+                    if not ready:
+                        if err:
+                            print(f"Socket error: {err}")
+                            if not sent_reconnect_msg:
+                                self.send_msg_to_txtchannel(reconnect_msg)
+                                sent_reconnect_msg = True
+
+                        time.sleep(sleep_time)
+                        sleep_time = sleep_time * 2
+                    else:
+                        sleep_time = 0.05
+                        sent_reconnect_msg = False
+                        break
+                except ValueError:
+                    # Socket has been closed.
+                    print("Socket has been closed.")
+                    if not sent_reconnect_msg:
+                        self.send_msg_to_txtchannel(reconnect_msg)
+                        sent_reconnect_msg = True
+                    time.sleep(sleep_time)
+                    sleep_time = sleep_time * 2
+            else:
+                # Didn't break, so we couldnt get a ready socket.
+                print(fail_msg)
+                self.send_msg_to_txtchannel(fail_msg)
+                self.stop_recording()
+                continue
+
+            for _ in range(0, 10):
+                try:
+                    data = self.socket.recv(4096)
+                    sleep_time = 0.05
+                    sent_reconnect_msg = False
+                    break
+                except OSError as e:
+                    print(f"Socket had an error, retrying... {e}")
+                    if not sent_reconnect_msg:
+                        self.send_msg_to_txtchannel(reconnect_msg)
+                        sent_reconnect_msg = True
+                    time.sleep(sleep_time)
+                    sleep_time = sleep_time * 2
+                    continue
+            else:
+                # Retry to get a ready socket?
+                continue
+            self.unpack_audio(data)
+
+        self.stopping_time = time.perf_counter()
+        self.sink.cleanup()
+        callback = asyncio.run_coroutine_threadsafe(callback(sink, *args), self.loop)
+        result = callback.result()
+
+        if result is not None:
+            print(result)
 
     def recv_decoded_audio(self, data: RawData):
         # Add silence when they were not being recorded.
