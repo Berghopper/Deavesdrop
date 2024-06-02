@@ -105,6 +105,8 @@ async def is_correct_channel(ctx):
 
 
 async def finished_callback(sink: MemoryConsiousMP3Sink, channel: discord.TextChannel):
+    print("Starting processing... (this may take a while/bot may be unresponsive)")
+    # FIXME: make ffmpeg calls properly async
     while sink.any_threads_alive():
         # wait for threads to finish
         await asyncio.sleep(1)

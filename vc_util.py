@@ -75,7 +75,6 @@ class MemoryConsiousMP3Sink(MP3Sink):
         self.max_size_mb = max_size_mb
         self.output_folder = output_folder
         self.write_threads = []
-        self.mem_in_threads = 0
         if output_fn:
             self.output_fn = output_fn
         os.makedirs(output_folder, exist_ok=True)
@@ -95,30 +94,33 @@ class MemoryConsiousMP3Sink(MP3Sink):
     def should_wait_for_memory(self, n=0):
         # print(f"Memory in threads: {self.mem_in_threads / (1024 * 1024)}")
         # print(f"Max thread size: {self.max_size_mb}")
-        return self.mem_in_threads + n > (self.max_size_mb * 1024 * 1024)
+        return self.mem_in_threads() + n > (self.max_size_mb * 1024 * 1024)
+
+    def mem_in_threads(self):
+        # First reomve dead threads
+        new_write_threads = []
+        for t, size in self.write_threads:
+            if t.is_alive():
+                new_write_threads.append((t, size))
+        self.write_threads = new_write_threads
+        return sum([size for t, size in self.write_threads if t.is_alive()])
 
     def await_free_mem(self):
         """
         Waits for the memory to be freed by the threads.
         Decoder might back up, but we can't do much about that.
         """
-        # print("Waiting for memory to be freed... too much memory stuck in threads.")
-        while (
-            self.mem_in_threads > (self.max_size_mb * 1024 * 1024) or self.write_threads
-        ):
+        print("Waiting for memory to be freed... too much memory stuck in threads.")
+        while self.mem_in_threads() > (self.max_size_mb * 1024 * 1024):
             time.sleep(0.1)
-            # Check if any threads have finished.
-            for i, (t, size) in enumerate(list(self.write_threads)):
-                if not t.is_alive():
-                    self.mem_in_threads -= size
-                    del self.write_threads[i]
         gc.collect()
-        # print("Memory freed! Resuming...")
+        print("Memory freed! Resuming...")
 
-    def flushToFiles(self):
+    def flushToFiles(self, force_all=False):
         """
         Swap out all the BytesIO objects for FileIO objects (if they're not already).
         """
+        current_size = self.get_total_size()
         # print("Flushing to files...")
         for user_id, audio in self.audio_data.items():
             if not hasattr(audio, "files_on_disk"):
@@ -127,12 +129,21 @@ class MemoryConsiousMP3Sink(MP3Sink):
                 )
 
             fn = f"{self.output_folder}/{user_id}_{datetime.now().strftime('%Y%m%d%H%M%S%f')}.mp3"
+            audio_size = audio.file.tell()
             # Check if empty, if it is, we don't need to write to a file.
-            if audio.file.tell() == 0:
+            if audio_size == 0:
+                continue
+            current_size_too_big = current_size > (
+                (self.max_mb_before_flush * 1024 * 1024) * 2
+            )
+            # If not empty, check if at least 10mb, if not, don't write to a file yet. (unless force_all or current_size is 2x over the limit)
+            if (
+                audio_size < (10 * 1024 * 1024)
+                and not force_all
+                and not current_size_too_big
+            ):
                 continue
             audio.files_on_disk.append(fn)
-            audio_size = audio.file.tell()
-
             if self.should_wait_for_memory(audio_size):
                 self.await_free_mem()
             t = threading.Thread(
@@ -144,7 +155,6 @@ class MemoryConsiousMP3Sink(MP3Sink):
             )
             t.start()
             # keep track of threads, so we can wait for them later.
-            self.mem_in_threads += audio_size
             self.write_threads.append((t, audio_size))
             # Possibly await here too, might be a big one.
             if self.should_wait_for_memory():
@@ -183,7 +193,7 @@ class MemoryConsiousMP3Sink(MP3Sink):
         Overwrites the cleanup method to flush the audio data.
         """
         self.finished = True
-        self.flushToFiles()
+        self.flushToFiles(force_all=True)
         # Now wait for all the threads to finish.
         while self.write_threads:
             t, size = self.write_threads.pop()

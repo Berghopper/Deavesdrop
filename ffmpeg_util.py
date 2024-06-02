@@ -70,7 +70,7 @@ def overlay_mp3_files(files: dict[str, int], fn: str):
     args.extend(
         [
             "-filter_complex",
-            f"amix=inputs={inputs_n}:duration=longest:weights={weight_str}",
+            f"amix=inputs={inputs_n}:normalize=0:dropout_transition=0:duration=longest:weights={weight_str}",
             fn,
         ]
     )
