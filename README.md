@@ -31,12 +31,13 @@ I'm not personally responsible for any misuse of this bot by others. This is jus
 - Add a way to convert opus straight to mp3 (instead of opus -> wav -> mp3)
 - Use rust?, or some other language for the audio processing (python is not the best for this)
 
-## Memory 'fixes'
+## Memory 'fixes'/other changes
 - Skipping usage of pydub altogether, because it stores plain wav in memory while processing.
   + Instead we use ffmpeg directly
 - Overriding audio sinks to flush audio to disk every ~100MB
 - Making sure silence frames are batched when writing. Before if a big amount of silence was recorded, it would be instantly generated in memory, creating memory spikes.
 - Using a custom voice client that wipes underlying decoders after 10k frames (causes memory leaks because c lib is not releasing memory) <- (maybe not needed?)
+- Attempting to await the socket if it closes unexpectedly (not sure if this works)
 
 ## Setup
 
@@ -47,6 +48,10 @@ I'm not personally responsible for any misuse of this bot by others. This is jus
 - add `secret.json`/`token.json` to `secrets` folder so we can authenticate with bot.
   + `token.json` needs to be retrieved manually with the `gauth.py` script and authorizing the bot.
 - run it!
+
+# Known issues
+Currently there's still issues with random hangs/crashes, it seems that the socket sometimes closes unexpectedly.
+Pycord does not account for any of this, so it's hard to debug/fix.
 
 ## Friendly reminder
 
